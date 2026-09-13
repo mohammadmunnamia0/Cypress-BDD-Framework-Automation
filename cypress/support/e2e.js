@@ -15,3 +15,5 @@
 
 // Import commands.js using ES2015 syntax:
 import './commands'
+// Register cypress-xpath so `cy.xpath` is available (install package first)
+import 'cypress-xpath'
