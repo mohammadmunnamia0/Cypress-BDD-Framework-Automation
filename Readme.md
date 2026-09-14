@@ -12,6 +12,8 @@ This project demonstrates how to set up a Cypress automation framework using Beh
 - [Project setup steps](#project-setup-steps)
 - [Project configuration](#project-configuration)
 - [Running the tests](#running-the-tests)
+- [Allure report implementation](#allure-report-implementation)
+- [File upload automation](#file-upload-automation)
 - [Folder structure](#folder-structure)
 - [Example feature file](#example-feature-file)
 - [Import details](#import-details)
@@ -115,6 +117,9 @@ The project uses the following dependencies (see `devDependencies` in `package.j
 | `@badeball/cypress-cucumber-preprocessor` | `^28.0.0` | Cucumber/Gherkin preprocessor for Cypress |
 | `@bahmutov/cypress-esbuild-preprocessor` | `^2.2.8` | ESBuild bundler that compiles `.feature` files and step definitions |
 | `cypress-xpath` | `^2.0.1` | Adds `cy.xpath()` support for XPath locators |
+| `cypress-file-upload` | `^5.0.8` | Uploads files from `cypress/fixtures/` with the `cy.attachFile()` command |
+| `allure-cypress` | `^3.12.1` | Official Allure plugin for Cypress — captures steps, screenshots, and test results |
+| `allure-commandline` | `^2.43.0` | Allure CLI — generates and serves the Allure HTML report |
 
 Install them as dev dependencies:
 
@@ -123,6 +128,9 @@ npm install cypress --save-dev
 npm install @badeball/cypress-cucumber-preprocessor --save-dev
 npm install @bahmutov/cypress-esbuild-preprocessor --save-dev
 npm install cypress-xpath --save-dev
+npm install cypress-file-upload --save-dev
+npm install allure-cypress --save-dev
+npm install allure-commandline --save-dev
 ```
 
 > ⚠️ **Dependency change:** the legacy `cypress-cucumber-preprocessor` package (from the older `TheBrainFamily` project) has been **replaced** with `@badeball/cypress-cucumber-preprocessor` (v28+). Its configuration keys also changed — see [Project configuration](#project-configuration) below.
@@ -217,10 +225,11 @@ npm install cypress-xpath --save-dev
 
 ### Step 8: Configure `cypress.config.js`
 
-Use the configuration below — it matches the current project setup (`@badeball/cypress-cucumber-preprocessor` registered via `addCucumberPreprocessorPlugin` and compiled with the ESBuild bundler):
+Use the configuration below — it matches the current project setup (`@badeball/cypress-cucumber-preprocessor` registered via `addCucumberPreprocessorPlugin`, compiled with the ESBuild bundler, and powered by the Allure reporter):
 
 ```js
 const { defineConfig } = require("cypress");
+const { allureCypress } = require("allure-cypress/reporter");
 
 const {
   addCucumberPreprocessorPlugin,
@@ -236,6 +245,9 @@ module.exports = defineConfig({
     specPattern: "cypress/e2e/features/*.feature",
 
     async setupNodeEvents(on, config) {
+      // Allure Report
+      allureCypress(on, config);
+
       // Register Cucumber
       await addCucumberPreprocessorPlugin(on, config);
 
@@ -257,6 +269,7 @@ This tells Cypress to:
 - Look for `.feature` files under `cypress/e2e/features/` via `specPattern`.
 - Register the Cucumber preprocessor in `setupNodeEvents`.
 - Use the ESBuild bundler to compile step definitions and their imports.
+- Register the Allure reporter (`allureCypress(on, config)`) so every run produces data for the Allure HTML report (see [Allure report implementation](#allure-report-implementation)).
 
 ### Step 9: Configure `package.json`
 
@@ -357,6 +370,7 @@ Full current file:
 
 ```js
 const { defineConfig } = require("cypress");
+const { allureCypress } = require("allure-cypress/reporter");
 
 const {
   addCucumberPreprocessorPlugin,
@@ -372,6 +386,9 @@ module.exports = defineConfig({
     specPattern: "cypress/e2e/features/*.feature",
 
     async setupNodeEvents(on, config) {
+      // Allure Report
+      allureCypress(on, config);
+
       // Register Cucumber
       await addCucumberPreprocessorPlugin(on, config);
 
@@ -393,6 +410,7 @@ What each piece does:
 
 - `specPattern: "cypress/e2e/features/*.feature"` — Cypress looks for `.feature` files only inside `cypress/e2e/features/`.
 - `setupNodeEvents(on, config)` — runs in Cypress's Node context and registers everything the project needs:
+  - `allureCypress(on, config)` — initializes the Allure reporter so test results, steps, and screenshots are written to `allure-results/` after every run.
   - `addCucumberPreprocessorPlugin(on, config)` — wires the Cucumber/Gherkin preprocessor into Cypress.
   - `createBundler({ plugins: [createEsbuildPlugin.default(config)] })` — the ESBuild file preprocessor that compiles the step definitions and their imports (`cy.xpath`, data/locator classes, etc.).
 - `return config;` — hands the (possibly modified) config object back to Cypress.
@@ -403,6 +421,8 @@ What each piece does:
 "devDependencies": {
   "@badeball/cypress-cucumber-preprocessor": "^28.0.0",
   "@bahmutov/cypress-esbuild-preprocessor": "^2.2.8",
+  "allure-commandline": "^2.43.0",
+  "allure-cypress": "^3.12.1",
   "cypress": "^16.0.0",
   "cypress-xpath": "^2.0.1"
 },
@@ -419,10 +439,20 @@ What each piece does:
 ```js
 import './commands'
 import 'cypress-xpath'
+import 'allure-cypress'
 ```
 
 - `import './commands'` — loads the default Cypress custom-commands file.
 - `import 'cypress-xpath'` — registers `cy.xpath()`, the XPath command used by the step definitions.
+- `import 'allure-cypress'` — activates Allure reporting so commands, steps, and screenshots are captured for the HTML report.
+
+### `cypress/support/commands.js`
+
+```js
+import 'cypress-file-upload';
+```
+
+- `import 'cypress-file-upload'` — registers the `cy.attachFile()` command (this file is loaded automatically through `import './commands'` in `e2e.js`), letting any test or step definition upload a fixture file to a file-input field (see [File upload automation](#file-upload-automation)).
 
 > ⚠️ **Configuration changes to be aware of:**
 > - The preprocessor key must be **`stepDefinitions`** (camelCase). Older guides showing `step-definitions` (kebab-case) or `nonGlobalStepDefinitions` are **outdated** — those keys are silently ignored. The preprocessor then falls back to its default search folders and you get `Step implementation missing for "..."`.
@@ -434,8 +464,8 @@ import 'cypress-xpath'
 ### Quick start (fresh clone)
 
 ```bash
-git clone https://github.com/mohammadmunnamia0/Cypress-BDD-Framework-Automation.git
-cd Cypress-BDD-Framework-Automation
+git clone https://github.com/username/repo_name.git
+cd repo_name
 npm install
 ```
 
@@ -470,6 +500,183 @@ If the application under test is reachable, a successful run reports **1 scenari
 - **`Step implementation missing for "..."`** — the `cypress-cucumber-preprocessor` config key in `package.json` is probably wrong. Use the camelCase `stepDefinitions` key shown above; `step-definitions` / `nonGlobalStepDefinitions` are ignored by v28+.
 - **`cy.xpath` not recognized / XPath locators do nothing** — make sure `import 'cypress-xpath'` is present in `cypress/support/e2e.js` and that `cypress-xpath` is in `devDependencies`.
 - **Tests pass locally but not in CI** — make sure `npx cypress run` is used, the application under test is reachable from the CI machine, and Node.js meets the version requirements above.
+
+## Allure report implementation
+
+This project uses **Allure Report** — the best reporting solution for a Cypress BDD (Cucumber) framework. Allure produces an interactive HTML dashboard that shows every Gherkin scenario/step, its status, parameters, execution time, and screenshots of failures, plus run history and trends across executions.
+
+Two packages make this work (see [Required dependencies](#required-dependencies)):
+
+- `allure-cypress` — the official Allure plugin for Cypress. It captures test steps, commands, attachments (screenshots), and results during the run and writes raw result files to the `allure-results/` folder.
+- `allure-commandline` — the Allure CLI used to turn `allure-results/` into a human-readable HTML report.
+
+### Step 1: Install the dependencies
+
+```bash
+npm install allure-cypress --save-dev
+npm install allure-commandline --save-dev
+```
+
+> ⚠️ **Note:** `allure-commandline` (Allure 2.x) requires **Java**. If `npx allure --version` fails with `JAVA_HOME is not set and no 'java' command could be found in your PATH`, install a JDK (8 or newer) and set `JAVA_HOME`. Alternatively, install Allure Report 3 instead (`npm install allure --save-dev`) and use the same commands below.
+
+### Step 2: Register the plugin in `cypress.config.js`
+
+Import the reporter from the `allure-cypress/reporter` subpath — **not** from the plain `allure-cypress` package — and call it first inside `setupNodeEvents`:
+
+```js
+const { allureCypress } = require("allure-cypress/reporter");
+
+async setupNodeEvents(on, config) {
+  // Allure Report
+  allureCypress(on, config);
+
+  // Register Cucumber
+  await addCucumberPreprocessorPlugin(on, config);
+
+  // Register ESBuild
+  on(
+    "file:preprocessor",
+    createBundler({
+      plugins: [createEsbuildPlugin.default(config)],
+    })
+  );
+
+  return config;
+}
+```
+
+### Step 3: Enable the support bundle in `cypress/support/e2e.js`
+
+```js
+import 'allure-cypress'
+```
+
+This is what makes Allure automatically record commands, steps, and screenshots during the run.
+
+### Step 4: Run the tests
+
+Run the suite in headless mode (this is what generates the Allure data):
+
+```bash
+npx cypress run
+```
+
+When the run finishes, raw Allure result files are written to the `allure-results/` folder at the project root.
+
+### Step 5: Generate and view the report
+
+Serve an interactive report at a local URL (opens your browser automatically; use `--port` to change the port):
+
+```bash
+npx allure serve allure-results
+```
+
+Or generate a static HTML report that can be shared or deployed:
+
+```bash
+npx allure generate allure-results --clean -o allure-report
+npx allure open allure-report
+```
+
+- `allure serve` — combines "generate + open" in one command and is ideal for local debugging.
+- `allure generate ... --clean` — overwrites the previous `allure-report/` so reports never go stale.
+- The generated report opens as `allure-report/index.html`.
+
+### Clean up between runs
+
+Start every run from a clean state by deleting the generated folders:
+
+```bash
+rm -rf allure-results allure-report
+```
+
+Both folders are **generated artifacts** and must not be committed. This project's `.gitignore` already excludes them:
+
+```text
+node_modules
+/allure-results/
+/allure-report/
+```
+
+### Troubleshooting
+
+- **`Cypress is not defined` when Cypress starts** — the plugin must be imported from `allure-cypress/reporter` in `cypress.config.js` (`const { allureCypress } = require("allure-cypress/reporter")`). Importing the plain `allure-cypress` package there loads browser-side code at config time and crashes Cypress.
+- **No `allure-results/` folder after the run** — make sure `allureCypress(on, config)` is called inside `setupNodeEvents` in `cypress.config.js` and that `import 'allure-cypress'` is present in `cypress/support/e2e.js`.
+- **`npx allure: command not found`** — `allure-commandline` is not installed. Run `npm install allure-commandline --save-dev`.
+- **`JAVA_HOME is not set and no 'java' command could be found`** — Allure 2 CLI needs Java. Install a JDK and set `JAVA_HOME`, or switch to Allure Report 3 with `npm install allure --save-dev`.
+
+## File upload automation
+
+This project uses **`cypress-file-upload`** — the standard Cypress plugin for uploading files (documents, images, PDFs, xlsx, etc.) to any file-input field. It adds a global `cy.attachFile()` command that works with `cy.get()`, `cy.xpath()`, and any other selector command.
+
+### Step 1: Install the plugin
+
+```bash
+npm install cypress-file-upload --save-dev
+```
+
+### Step 2: Register the custom command
+
+Open `cypress/support/commands.js` and add the import (already done in this project):
+
+```js
+import 'cypress-file-upload';
+```
+
+`commands.js` is loaded automatically by `cypress/support/e2e.js` via `import './commands'`, so `cy.attachFile()` is available globally in every test and step definition.
+
+### Step 3: Place the upload file in `cypress/fixtures/`
+
+Put the file(s) you want to upload inside `cypress/fixtures/`, for example:
+
+- `cypress/fixtures/receipt.pdf`
+- `cypress/fixtures/avatar.png`
+- `cypress/fixtures/statement.xlsx`
+
+By default `cy.attachFile()` resolves the given file name against the project's `fixtures` folder.
+
+### Step 4: Use `cy.attachFile()` in your tests / step definitions
+
+Target the file input element and attach the fixture file:
+
+```js
+// CSS selector
+cy.get('input[type="file"]').attachFile('receipt.pdf');
+
+// XPath locator (this project uses cy.xpath)
+cy.xpath(locators.FileUpload).attachFile('avatar.png');
+
+// With an explicit fixture path and MIME type
+cy.get('input[type="file"]').attachFile({
+  filePath: 'receipt.pdf',
+  mimeType: 'application/pdf',
+});
+```
+
+#### In a BDD scenario
+
+`cypress/e2e/features/`:
+
+```gherkin
+Scenario: User uploads a receipt
+    Given User is on the Upload page
+    When User uploads the file "receipt.pdf"
+    Then User should see the upload confirmation
+```
+
+`cypress/e2e/step_definitions/`:
+
+```js
+When('User uploads the file {string}', (fileName) => {
+    cy.get('input[type="file"]').attachFile(fileName);
+});
+```
+
+### Troubleshooting
+
+- **`cy.attachFile is not a function`** — `import 'cypress-file-upload'` is missing from `cypress/support/commands.js`, or `import './commands'` is missing from `cypress/support/e2e.js`.
+- **`File ... does not exist`** — the file is not inside `cypress/fixtures/`, or the file name/path does not match. Pass the path relative to `fixtures`, e.g. `documents/receipt.pdf`.
+- **Upload seems to do nothing** — `cy.attachFile()` sets the file value directly on the `<input type="file">` element, so it also works on visually hidden file inputs. Make sure the selector resolves to the `<input>` itself and not to a wrapper `<div>`.
 
 ## Folder structure
 
@@ -610,6 +817,12 @@ Before starting test-case development, make sure you have completed the followin
 - [ ] Feature file pattern configured (`specPattern` in `cypress.config.js`)
 - [ ] `stepDefinitions` path configured (camelCase key in `package.json`)
 - [ ] `cypress-xpath` registered in `cypress/support/e2e.js`
+- [ ] `cypress-file-upload` installed
+- [ ] `import 'cypress-file-upload'` added in `cypress/support/commands.js`
+- [ ] `allure-cypress` and `allure-commandline` installed
+- [ ] `allureCypress(on, config)` registered in `cypress.config.js`
+- [ ] `import 'allure-cypress'` added in `cypress/support/e2e.js`
+- [ ] Allure HTML report generated successfully (`npx allure serve allure-results`)
 - [ ] Tests run successfully (`npx cypress run` / `npx cypress open`)
 
 ## Next step

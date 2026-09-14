@@ -12,6 +12,7 @@
 // });
 
 const { defineConfig } = require("cypress");
+const { allureCypress } = require("allure-cypress/reporter");
 
 const {
   addCucumberPreprocessorPlugin,
@@ -27,6 +28,10 @@ module.exports = defineConfig({
     specPattern: "cypress/e2e/features/*.feature",
 
     async setupNodeEvents(on, config) {
+
+      //Allure Report
+      allureCypress(on, config);
+
       // Register Cucumber
       await addCucumberPreprocessorPlugin(on, config);
 

@@ -17,3 +17,6 @@
 import './commands'
 // Register cypress-xpath so `cy.xpath` is available (install package first)
 import 'cypress-xpath'
+
+// Enable Allure reporting (captures steps, commands, and screenshots)
+import 'allure-cypress'
